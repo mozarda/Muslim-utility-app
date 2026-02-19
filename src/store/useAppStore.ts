@@ -5,51 +5,67 @@ interface MemorizedAyat {
   surahNumber: number;
   verseNumber: number;
   text: string;
-  lastReviewed: Date;
-  nextReview: Date;
-  proficiency: number; // 0-5, 0=new, 5=mastered
+  repetitionCount: number; // How many times repeated (Takrar method)
+  targetRepetitions: number; // Usually 40
+  lastRepeat: Date;
+  dailyRepeatCount: number; // How many times repeated today
+  proficiency: number; // 0-5, derived or manual override
 }
 
 interface AppState {
   memorizedAyat: MemorizedAyat[];
-  dailyGoal: number;
-  addMemorizedAyat: (ayat: Omit<MemorizedAyat, 'lastReviewed' | 'nextReview'>) => void;
-  updateProficiency: (surahNumber: number, verseNumber: number, newProficiency: number) => void;
+  dailyGoal: number; // Target repetitions per day (total across all ayat)
+  addMemorizedAyat: (ayat: Omit<MemorizedAyat, 'repetitionCount' | 'dailyRepeatCount' | 'lastRepeat'>) => void;
+  incrementRepetition: (surahNumber: number, verseNumber: number) => void;
   setDailyGoal: (goal: number) => void;
-  getDailyProgress: () => number;
+  getDailyProgress: () => number; // Total repetitions done today
+  resetDailyCounts: () => void; // Call at start of day to reset dailyRepeatCount
 }
 
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
       memorizedAyat: [],
-      dailyGoal: 5,
+      dailyGoal: 20, // 20 repetitions per day as default
       addMemorizedAyat: (ayat) =>
         set((state) => ({
           memorizedAyat: [
             ...state.memorizedAyat,
             {
               ...ayat,
-              lastReviewed: new Date(),
-              nextReview: new Date(Date.now() + 24 * 60 * 60 * 1000), // 1 day later
+              repetitionCount: 0,
+              targetRepetitions: 40, // Takrar: 40 repetitions
+              dailyRepeatCount: 0,
+              lastRepeat: new Date(0), // epoch
+              proficiency: 0,
             },
           ],
         })),
-      updateProficiency: (surahNumber, verseNumber, newProficiency) =>
+      incrementRepetition: (surahNumber, verseNumber) =>
         set((state) => ({
-          memorizedAyat: state.memorizedAyat.map((a) =>
-            a.surahNumber === surahNumber && a.verseNumber === verseNumber
-              ? { ...a, proficiency: newProficiency, lastReviewed: new Date() }
-              : a
-          ),
+          memorizedAyat: state.memorizedAyat.map((a) => {
+            if (a.surahNumber === surahNumber && a.verseNumber === verseNumber) {
+              const newCount = a.repetitionCount + 1;
+              const newProficiency = newCount >= 40 ? 5 : Math.min(5, Math.floor((newCount / 40) * 5));
+              return {
+                ...a,
+                repetitionCount: newCount,
+                proficiency: newProficiency,
+                lastRepeat: new Date(),
+                dailyRepeatCount: a.dailyRepeatCount + 1,
+              };
+            }
+            return a;
+          }),
         })),
       setDailyGoal: (goal) => set({ dailyGoal: goal }),
       getDailyProgress: () => {
-        const today = new Date().toDateString();
-        return get().memorizedAyat.filter(
-          (a) => a.lastReviewed.toDateString() === today
-        ).length;
+        return get().memorizedAyat.reduce((sum, a) => sum + a.dailyRepeatCount, 0);
       },
+      resetDailyCounts: () =>
+        set((state) => ({
+          memorizedAyat: state.memorizedAyat.map((a) => ({ ...a, dailyRepeatCount: 0 })),
+        })),
     }),
     {
       name: 'muslim-utility-app-storage',
