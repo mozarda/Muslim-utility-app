@@ -15,9 +15,11 @@ interface MemorizedAyat {
 interface AppState {
   memorizedAyat: MemorizedAyat[];
   dailyGoal: number; // Target repetitions per day (total across all ayat)
-  addMemorizedAyat: (ayat: Omit<MemorizedAyat, 'repetitionCount' | 'dailyRepeatCount' | 'lastRepeat'>) => void;
+  defaultTargetRepetitions: number; // Default repetitions per ayat (Takrar count)
+  addMemorizedAyat: (ayat: Omit<MemorizedAyat, 'repetitionCount' | 'dailyRepeatCount' | 'lastRepeat' | 'targetRepetitions'>, targetReps?: number) => void;
   incrementRepetition: (surahNumber: number, verseNumber: number) => void;
   setDailyGoal: (goal: number) => void;
+  setDefaultTargetRepetitions: (target: number) => void;
   getDailyProgress: () => number; // Total repetitions done today
   resetDailyCounts: () => void; // Call at start of day to reset dailyRepeatCount
 }
@@ -27,20 +29,22 @@ export const useAppStore = create<AppState>()(
     (set, get) => ({
       memorizedAyat: [],
       dailyGoal: 20, // 20 repetitions per day as default
-      addMemorizedAyat: (ayat) =>
+      defaultTargetRepetitions: 25, // Default Takrar repetitions per ayat
+      addMemorizedAyat: (ayat, targetReps = 25) =>
         set((state) => ({
           memorizedAyat: [
             ...state.memorizedAyat,
             {
               ...ayat,
               repetitionCount: 0,
-              targetRepetitions: 40, // Takrar: 40 repetitions
+              targetRepetitions: targetReps,
               dailyRepeatCount: 0,
               lastRepeat: new Date(0), // epoch
               proficiency: 0,
             },
           ],
         })),
+      setDefaultTargetRepetitions: (target) => set({ defaultTargetRepetitions: target }),
       incrementRepetition: (surahNumber, verseNumber) =>
         set((state) => ({
           memorizedAyat: state.memorizedAyat.map((a) => {

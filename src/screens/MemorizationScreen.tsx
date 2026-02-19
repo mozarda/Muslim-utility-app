@@ -3,10 +3,11 @@ import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert, ProgressBarA
 import { useAppStore } from '../store/useAppStore';
 
 export default function MemorizationScreen() {
-  const { memorizedAyat, dailyGoal, addMemorizedAyat, incrementRepetition, setDailyGoal, getDailyProgress, resetDailyCounts } = useAppStore();
+  const { memorizedAyat, dailyGoal, defaultTargetRepetitions, addMemorizedAyat, incrementRepetition, setDailyGoal, setDefaultTargetRepetitions, getDailyProgress, resetDailyCounts } = useAppStore();
   const [surahInput, setSurahInput] = useState('');
   const [verseInput, setVerseInput] = useState('');
   const [textInput, setTextInput] = useState('');
+  const [targetInput, setTargetInput] = useState(defaultTargetRepetitions.toString());
   const [showForm, setShowForm] = useState(false);
   const dailyProgress = getDailyProgress();
 
@@ -15,17 +16,18 @@ export default function MemorizationScreen() {
       Alert.alert('Missing info', 'Please fill all fields');
       return;
     }
+    const target = parseInt(targetInput, 10) || defaultTargetRepetitions;
     addMemorizedAyat({
       surahNumber: parseInt(surahInput, 10),
       verseNumber: parseInt(verseInput, 10),
       text: textInput,
-      proficiency: 0,
-    });
+    }, target);
     setSurahInput('');
     setVerseInput('');
     setTextInput('');
+    setTargetInput(defaultTargetRepetitions.toString());
     setShowForm(false);
-    Alert.alert('Success', 'Ayat added. Start repeating 40 times!');
+    Alert.alert('Success', 'Ayat added. Start repeating!');
   };
 
   const handleRepeat = (surahNum: number, verseNum: number) => {
@@ -89,6 +91,16 @@ export default function MemorizationScreen() {
         </TouchableOpacity>
       </View>
 
+      <View style={styles.goalSection}>
+        <Text style={styles.goalLabel}>Default reps/ayat:</Text>
+        <TextInput
+          style={styles.goalInput}
+          value={defaultTargetRepetitions.toString()}
+          onChangeText={(text) => setDefaultTargetRepetitions(parseInt(text, 10) || 25)}
+          keyboardType="number-pad"
+        />
+      </View>
+
       {!showForm ? (
         <TouchableOpacity style={styles.repeatButton} onPress={() => setShowForm(true)}>
           <Text style={styles.repeatText}>+ Add New Ayat</Text>
@@ -115,6 +127,13 @@ export default function MemorizationScreen() {
             value={textInput}
             onChangeText={setTextInput}
             multiline
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Target repetitions (default: 25)"
+            value={targetInput}
+            onChangeText={setTargetInput}
+            keyboardType="number-pad"
           />
           <View style={styles.formButtons}>
             <TouchableOpacity style={[styles.formButton, styles.saveButton]} onPress={handleAdd}>
