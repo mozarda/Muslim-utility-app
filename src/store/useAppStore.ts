@@ -2,26 +2,27 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 interface MemorizedAyat {
+  id: string;
   surahNumber: number;
   verseNumber: number;
   text: string;
-  repetitionCount: number; // How many times repeated (Takrar method)
-  targetRepetitions: number; // Usually 40
+  repetitionCount: number;
+  targetRepetitions: number;
   lastRepeat: Date;
-  dailyRepeatCount: number; // How many times repeated today
-  proficiency: number; // 0-5, derived or manual override
+  dailyRepeatCount: number;
+  proficiency: number;
 }
 
 interface AppState {
   memorizedAyat: MemorizedAyat[];
-  dailyGoal: number; // Target repetitions per day (total across all ayat)
-  defaultTargetRepetitions: number; // Default repetitions per ayat (Takrar count)
-  addMemorizedAyat: (ayat: Omit<MemorizedAyat, 'repetitionCount' | 'dailyRepeatCount' | 'lastRepeat' | 'targetRepetitions'>, targetReps?: number) => void;
-  incrementRepetition: (surahNumber: number, verseNumber: number) => void;
+  dailyGoal: number;
+  defaultTargetRepetitions: number;
+  addMemorizedAyat: (ayat: Omit<MemorizedAyat, 'id' | 'repetitionCount' | 'dailyRepeatCount' | 'lastRepeat' | 'targetRepetitions' | 'proficiency'>, targetReps?: number) => boolean;
+  incrementRepetition: (id: string) => void;
   setDailyGoal: (goal: number) => void;
   setDefaultTargetRepetitions: (target: number) => void;
-  getDailyProgress: () => number; // Total repetitions done today
-  resetDailyCounts: () => void; // Call at start of day to reset dailyRepeatCount
+  getDailyProgress: () => number;
+  resetDailyCounts: () => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -30,45 +31,58 @@ export const useAppStore = create<AppState>()(
       memorizedAyat: [],
       dailyGoal: 20, // 20 repetitions per day as default
       defaultTargetRepetitions: 25, // Default Takrar repetitions per ayat
-      addMemorizedAyat: (ayat, targetReps = 25) =>
+      addMemorizedAyat: (ayat, targetReps = 25) => {
+        const exists = get().memorizedAyat.some(
+          (a) => a.surahNumber === ayat.surahNumber && a.verseNumber === ayat.verseNumber
+        );
+        if (exists) {
+          return false;
+        }
+        const id = `ayat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         set((state) => ({
           memorizedAyat: [
             ...state.memorizedAyat,
             {
+              id,
               ...ayat,
               repetitionCount: 0,
               targetRepetitions: targetReps,
               dailyRepeatCount: 0,
-              lastRepeat: new Date(0), // epoch
+              lastRepeat: new Date(0),
               proficiency: 0,
             },
           ],
-        })),
+        }));
+        return true;
+      },
       setDefaultTargetRepetitions: (target) => set({ defaultTargetRepetitions: target }),
-      incrementRepetition: (surahNumber, verseNumber) =>
-        set((state) => ({
-          memorizedAyat: state.memorizedAyat.map((a) => {
-            if (a.surahNumber === surahNumber && a.verseNumber === verseNumber) {
-              const newCount = a.repetitionCount + 1;
-              const newProficiency = newCount >= 40 ? 5 : Math.min(5, Math.floor((newCount / 40) * 5));
-              return {
-                ...a,
-                repetitionCount: newCount,
-                proficiency: newProficiency,
-                lastRepeat: new Date(),
-                dailyRepeatCount: a.dailyRepeatCount + 1,
-              };
-            }
-            return a;
-          }),
-        })),
+      incrementRepetition: (id: string) =>
+        set((state) => {
+          const ayat = state.memorizedAyat.find((a) => a.id === id);
+          if (!ayat) return state;
+          const newCount = ayat.repetitionCount + 1;
+          const newProficiency = Math.min(5, Math.floor((newCount / ayat.targetRepetitions) * 5));
+          return {
+            memorizedAyat: state.memorizedAyat.map((a) =>
+              a.id === id
+                ? {
+                    ...a,
+                    repetitionCount: newCount,
+                    proficiency: newProficiency,
+                    lastRepeat: new Date(),
+                    dailyRepeatCount: a.dailyRepeatCount + 1,
+                  }
+                : a
+            ),
+          };
+        }),
       setDailyGoal: (goal) => set({ dailyGoal: goal }),
       getDailyProgress: () => {
         return get().memorizedAyat.reduce((sum, a) => sum + a.dailyRepeatCount, 0);
       },
       resetDailyCounts: () =>
         set((state) => ({
-          memorizedAyat: state.memorizedAyat.map((a) => ({ ...a, dailyRepeatCount: 0 })),
+          memorizedAyat: state.memorizedAyat.map((a) => ({ ...a, dailyRepeatCount: 0, lastRepeat: new Date(0) })),
         })),
     }),
     {

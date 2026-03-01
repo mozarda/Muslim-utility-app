@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert, ProgressBarAndroid, ProgressBarIOS } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert, TextInput } from 'react-native';
 import { useAppStore } from '../store/useAppStore';
 
 export default function MemorizationScreen() {
@@ -9,19 +9,59 @@ export default function MemorizationScreen() {
   const [textInput, setTextInput] = useState('');
   const [targetInput, setTargetInput] = useState(defaultTargetRepetitions.toString());
   const [showForm, setShowForm] = useState(false);
+  const [goalInput, setGoalInput] = useState(dailyGoal.toString());
+  const [defaultTargetInput, setDefaultTargetInput] = useState(defaultTargetRepetitions.toString());
   const dailyProgress = getDailyProgress();
+
+  // Sync goal input with store when default changes
+  useEffect(() => {
+    setGoalInput(dailyGoal.toString());
+  }, [dailyGoal]);
+
+  // Sync default target input with store when it changes
+  useEffect(() => {
+    setDefaultTargetInput(defaultTargetRepetitions.toString());
+  }, [defaultTargetRepetitions]);
+
+  const validateInputs = useCallback(() => {
+    const surah = parseInt(surahInput, 10);
+    const verse = parseInt(verseInput, 10);
+    const target = parseInt(targetInput, 10);
+
+    if (isNaN(surah) || surah < 1 || surah > 114) {
+      Alert.alert('Invalid Input', 'Surah number must be between 1 and 114');
+      return false;
+    }
+    if (isNaN(verse) || verse < 1) {
+      Alert.alert('Invalid Input', 'Verse number must be a positive integer');
+      return false;
+    }
+    if (isNaN(target) || target < 1 || target > 1000) {
+      Alert.alert('Invalid Input', 'Target repetitions must be between 1 and 1000');
+      return false;
+    }
+    return true;
+  }, [surahInput, verseInput, targetInput]);
 
   const handleAdd = () => {
     if (!surahInput || !verseInput || !textInput) {
       Alert.alert('Missing info', 'Please fill all fields');
       return;
     }
-    const target = parseInt(targetInput, 10) || defaultTargetRepetitions;
-    addMemorizedAyat({
+    if (!validateInputs()) return;
+
+    const target = parseInt(targetInput, 10);
+    const success = addMemorizedAyat({
       surahNumber: parseInt(surahInput, 10),
       verseNumber: parseInt(verseInput, 10),
       text: textInput,
     }, target);
+
+    if (!success) {
+      Alert.alert('Duplicate', 'This ayat already exists in your memorization list');
+      return;
+    }
+
     setSurahInput('');
     setVerseInput('');
     setTextInput('');
@@ -30,8 +70,26 @@ export default function MemorizationScreen() {
     Alert.alert('Success', 'Ayat added. Start repeating!');
   };
 
-  const handleRepeat = (surahNum: number, verseNum: number) => {
-    incrementRepetition(surahNum, verseNum);
+  const handleRepeat = (id: string) => {
+    incrementRepetition(id);
+  };
+
+  const handleDailyGoalBlur = () => {
+    const value = parseInt(goalInput, 10);
+    if (isNaN(value) || value < 0) {
+      setGoalInput(dailyGoal.toString());
+    } else {
+      setDailyGoal(value);
+    }
+  };
+
+  const handleDefaultTargetBlur = () => {
+    const value = parseInt(defaultTargetInput, 10);
+    if (isNaN(value) || value < 1 || value > 1000) {
+      setDefaultTargetInput(defaultTargetRepetitions.toString());
+    } else {
+      setDefaultTargetRepetitions(value);
+    }
   };
 
   const styles = StyleSheet.create({
@@ -82,8 +140,9 @@ export default function MemorizationScreen() {
         <Text style={styles.goalLabel}>Daily rep goal:</Text>
         <TextInput
           style={styles.goalInput}
-          value={dailyGoal.toString()}
-          onChangeText={(text) => setDailyGoal(parseInt(text, 10) || 0)}
+          value={goalInput}
+          onChangeText={setGoalInput}
+          onBlur={handleDailyGoalBlur}
           keyboardType="number-pad"
         />
         <TouchableOpacity style={styles.resetDayButton} onPress={resetDailyCounts}>
@@ -95,8 +154,9 @@ export default function MemorizationScreen() {
         <Text style={styles.goalLabel}>Default reps/ayat:</Text>
         <TextInput
           style={styles.goalInput}
-          value={defaultTargetRepetitions.toString()}
-          onChangeText={(text) => setDefaultTargetRepetitions(parseInt(text, 10) || 25)}
+          value={defaultTargetInput}
+          onChangeText={setDefaultTargetInput}
+          onBlur={handleDefaultTargetBlur}
           keyboardType="number-pad"
         />
       </View>
@@ -149,12 +209,13 @@ export default function MemorizationScreen() {
       <Text style={{ marginTop: 20, marginBottom: 10, fontSize: 18, fontWeight: '600' }}>
         Overall Progress: {totalProgress} / {totalTarget} reps
       </Text>
-      <ProgressBarAndroid style={{ width: '100%', height: 8, marginBottom: 20 }} progress={Math.min(overallPercent, 1)} color="#2e7d32" />
-      {Platform.OS === 'ios' && <ProgressBarIOS progress={Math.min(overallPercent, 1)} color="#2e7d32" style={{ width: '100%', marginBottom: 20 }} />}
+      <View style={[styles.progressBar, { marginBottom: 20 }]}>
+        <View style={[styles.progressFill, { width: `${Math.min(overallPercent * 100, 100)}%` }]} />
+      </View>
 
       <FlatList
         data={memorizedAyat.slice().reverse()}
-        keyExtractor={(item, index) => `${item.surahNumber}-${item.verseNumber}-${index}`}
+        keyExtractor={(item) => item.id}
         renderItem={({ item }) => {
           const progress = item.repetitionCount / item.targetRepetitions;
           const isComplete = item.repetitionCount >= item.targetRepetitions;
@@ -172,7 +233,7 @@ export default function MemorizationScreen() {
               
               <TouchableOpacity 
                 style={[styles.repeatButton, isComplete && { backgroundColor: '#4caf50' }]} 
-                onPress={() => handleRepeat(item.surahNumber, item.verseNumber)}
+                onPress={() => handleRepeat(item.id)}
               >
                 <Text style={styles.repeatText}>{isComplete ? 'Completed ✓' : `Repeat (${item.repetitionCount})`}</Text>
               </TouchableOpacity>

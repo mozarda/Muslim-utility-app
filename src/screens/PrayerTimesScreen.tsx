@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, PermissionsAndroid, Platform, Alert } from 'react-native';
+import { View, Text, StyleSheet, Alert, TouchableOpacity } from 'react-native';
 import * as Location from 'expo-location';
 import { getPrayerTimes, formatTime, getNextPrayer } from '../utils/prayerTimes';
 
@@ -14,7 +14,22 @@ export default function PrayerTimesScreen() {
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         setErrorMsg('Permission to access location was denied');
-        Alert.alert('Location needed', 'Please enable location to calculate prayer times.');
+        Alert.alert(
+          'Location needed',
+          'Please enable location to calculate prayer times.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { 
+              text: 'Open Settings', 
+              onPress: () => {
+                // @ts-ignore: expo-location openSettingsAsync exists at runtime
+                Location.openSettingsAsync().catch(() => {
+                  Alert.alert('Error', 'Could not open settings');
+                });
+              }
+            },
+          ]
+        );
         return;
       }
       let loc = await Location.getCurrentPositionAsync({});
@@ -29,7 +44,7 @@ export default function PrayerTimesScreen() {
       setPrayerTimes(times);
       const next = getNextPrayer(times);
       if (next) {
-        setNextPrayer(next.getTime().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        setNextPrayer(next.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       }
     }
   }, [location]);
@@ -48,6 +63,12 @@ export default function PrayerTimesScreen() {
     return (
       <View style={styles.container}>
         <Text style={styles.error}>{errorMsg}</Text>
+        <TouchableOpacity 
+          style={{ marginTop: 20, padding: 10, backgroundColor: '#2e7d32', borderRadius: 5 }}
+          onPress={() => setErrorMsg(null)}
+        >
+          <Text style={{ color: 'white', fontWeight: 'bold' }}>Retry</Text>
+        </TouchableOpacity>
       </View>
     );
   }

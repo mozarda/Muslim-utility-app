@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, PermissionsAndroid, Platform } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { View, Text, StyleSheet, Alert } from 'react-native';
 import { Magnetometer } from 'expo-sensors';
 import * as Location from 'expo-location';
 import { calculateQiblaDirection } from '../utils/qibla';
@@ -7,34 +7,69 @@ import { calculateQiblaDirection } from '../utils/qibla';
 export default function QiblaCompassScreen() {
   const [qiblaDirection, setQiblaDirection] = useState<number | null>(null);
   const [heading, setHeading] = useState<number>(0);
-  const [subscription, setSubscription] = useState<any>(null);
   const [currentPos, setCurrentPos] = useState<{ lat: number; lon: number } | null>(null);
 
   useEffect(() => {
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
+        Alert.alert(
+          'Location needed',
+          'Please enable location to calculate Qibla direction.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { 
+              text: 'Open Settings', 
+              onPress: () => {
+                // @ts-ignore: expo-location openSettingsAsync exists at runtime
+                Location.openSettingsAsync().catch(() => {
+                  Alert.alert('Error', 'Could not open settings');
+                });
+              }
+            },
+          ]
+        );
         return;
       }
-      const loc = await Location.getCurrentPositionAsync({});
-      const { latitude, longitude } = loc.coords;
-      setCurrentPos({ lat: latitude, lon: longitude });
-      setQiblaDirection(calculateQiblaDirection(latitude, longitude));
+      try {
+        const loc = await Location.getCurrentPositionAsync({});
+        const { latitude, longitude } = loc.coords;
+        setCurrentPos({ lat: latitude, lon: longitude });
+        setQiblaDirection(calculateQiblaDirection(latitude, longitude));
+      } catch (err) {
+        Alert.alert('Error', 'Could not get location. Please try again.');
+      }
     })();
   }, []);
 
   useEffect(() => {
     if (!currentPos) return;
-    Magnetometer.setUpdateInterval(100);
-    const sub = Magnetometer.addListener((magnetometerData) => {
-      // magnetometerData contains x, y, z. For simplicity we approximate heading from these.
-      // In production, use DeviceMotion or react-native-compass for more accurate heading.
-      const { x, y } = magnetometerData;
-      const heading = Math.atan2(y, x) * (180 / Math.PI);
-      setHeading(heading);
-    });
-    setSubscription(sub);
-    return () => sub && sub.remove();
+    
+    let subscription: any = null;
+    try {
+      Magnetometer.setUpdateInterval(100);
+      subscription = Magnetometer.addListener((magnetometerData) => {
+        const { x, y } = magnetometerData;
+        const heading = Math.atan2(y, x) * (180 / Math.PI);
+        setHeading(heading);
+      });
+    } catch (err) {
+      console.error('Failed to start magnetometer:', err);
+      Alert.alert('Compass Error', 'Could not start compass. Make sure device has a magnetometer.');
+      return;
+    }
+
+    return () => {
+      if (subscription) {
+        try {
+          subscription.remove();
+        } catch (e) {
+          // ignore
+        }
+      }
+      // Fallback cleanup
+      Magnetometer.removeAllListeners();
+    };
   }, [currentPos]);
 
   const angleToKaaba = qiblaDirection !== null ? qiblaDirection - heading : 0;

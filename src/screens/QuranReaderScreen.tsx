@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, TextInput } from 'react-native';
 import quranData from '../data/quran-sample.json';
 
@@ -14,17 +14,26 @@ export default function QuranReaderScreen() {
   const [surahs, setSurahs] = useState<Surah[]>([]);
   const [selectedSurah, setSelectedSurah] = useState<Surah | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(searchQuery), 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   useEffect(() => {
     setSurahs(quranData.surahs as Surah[]);
   }, []);
 
-  const filteredSurahs = surahs.filter(
-    (s) =>
-      s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      s.englishName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      s.number.toString() === searchQuery
-  );
+  const filteredSurahs = useMemo(() => {
+    if (!debouncedQuery) return surahs;
+    return surahs.filter(
+      (s) =>
+        s.name.toLowerCase().includes(debouncedQuery.toLowerCase()) ||
+        s.englishName.toLowerCase().includes(debouncedQuery.toLowerCase()) ||
+        s.number.toString() === debouncedQuery
+    );
+  }, [surahs, debouncedQuery]);
 
   const styles = StyleSheet.create({
     container: { flex: 1, padding: 10 },
@@ -46,13 +55,21 @@ export default function QuranReaderScreen() {
         <Text style={{ fontSize: 20, fontWeight: 'bold', textAlign: 'center', marginBottom: 10 }}>
           {selectedSurah.englishName} ({selectedSurah.name})
         </Text>
-        {selectedSurah.ayahs.map((ayah) => (
-          <View key={ayah.number} style={{ marginBottom: 12 }}>
-            <Text style={styles.verseText}>
-              <Text style={styles.verseNumber}>{ayah.number}.</Text> {ayah.text}
-            </Text>
-          </View>
-        ))}
+        <FlatList
+          data={selectedSurah.ayahs}
+          keyExtractor={(item) => item.number.toString()}
+          initialNumToRender={20}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          removeClippedSubviews={true}
+          renderItem={({ item }) => (
+            <View key={item.number} style={{ marginBottom: 12 }}>
+              <Text style={styles.verseText}>
+                <Text style={styles.verseNumber}>{item.number}.</Text> {item.text}
+              </Text>
+            </View>
+          )}
+        />
       </View>
     );
   }
@@ -68,12 +85,19 @@ export default function QuranReaderScreen() {
       <FlatList
         data={filteredSurahs}
         keyExtractor={(item) => item.number.toString()}
+        initialNumToRender={20}
+        maxToRenderPerBatch={10}
+        windowSize={5}
+        removeClippedSubviews={true}
         renderItem={({ item }) => (
           <TouchableOpacity style={styles.surahItem} onPress={() => setSelectedSurah(item)}>
             <Text style={styles.surahName}>{item.englishName} ({item.name})</Text>
             <Text style={styles.surahInfo}>{item.numberOfAyahs} ayahs</Text>
           </TouchableOpacity>
         )}
+        ListEmptyComponent={
+          <Text style={{ textAlign: 'center', marginTop: 20, color: '#999' }}>No surahs found.</Text>
+        }
       />
     </View>
   );
