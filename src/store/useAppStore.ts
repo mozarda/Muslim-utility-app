@@ -1,6 +1,19 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+export interface TajweedMistake {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface TajweedCheckResult {
+  transcription: string;
+  isCorrect: boolean;
+  mistakes: TajweedMistake[];
+  checkedAt?: string; // ISO date string
+}
+
 interface MemorizedAyat {
   id: string;
   surahNumber: number;
@@ -8,21 +21,23 @@ interface MemorizedAyat {
   text: string;
   repetitionCount: number;
   targetRepetitions: number;
-  lastRepeat: Date;
+  lastRepeat: string; // ISO date string (persist-friendly)
   dailyRepeatCount: number;
   proficiency: number;
+  lastTajweedCheck: TajweedCheckResult | null;
 }
 
 interface AppState {
   memorizedAyat: MemorizedAyat[];
   dailyGoal: number;
   defaultTargetRepetitions: number;
-  addMemorizedAyat: (ayat: Omit<MemorizedAyat, 'id' | 'repetitionCount' | 'dailyRepeatCount' | 'lastRepeat' | 'targetRepetitions' | 'proficiency'>, targetReps?: number) => boolean;
+  addMemorizedAyat: (ayat: Omit<MemorizedAyat, 'id' | 'repetitionCount' | 'dailyRepeatCount' | 'lastRepeat' | 'targetRepetitions' | 'proficiency' | 'lastTajweedCheck'>, targetReps?: number) => boolean;
   incrementRepetition: (id: string) => void;
   setDailyGoal: (goal: number) => void;
   setDefaultTargetRepetitions: (target: number) => void;
   getDailyProgress: () => number;
   resetDailyCounts: () => void;
+  recordTajweedCheck: (id: string, result: TajweedCheckResult) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -48,8 +63,9 @@ export const useAppStore = create<AppState>()(
               repetitionCount: 0,
               targetRepetitions: targetReps,
               dailyRepeatCount: 0,
-              lastRepeat: new Date(0),
+              lastRepeat: new Date(0).toISOString(),
               proficiency: 0,
+              lastTajweedCheck: null,
             },
           ],
         }));
@@ -69,20 +85,35 @@ export const useAppStore = create<AppState>()(
                     ...a,
                     repetitionCount: newCount,
                     proficiency: newProficiency,
-                    lastRepeat: new Date(),
+                    lastRepeat: new Date().toISOString(),
                     dailyRepeatCount: a.dailyRepeatCount + 1,
                   }
                 : a
             ),
           };
         }),
+      recordTajweedCheck: (id: string, result: TajweedCheckResult) => {
+        set((state) => ({
+          memorizedAyat: state.memorizedAyat.map((a) =>
+            a.id === id
+              ? {
+                  ...a,
+                  lastTajweedCheck: {
+                    ...result,
+                    checkedAt: new Date().toISOString(),
+                  },
+                }
+              : a
+          ),
+        }));
+      },
       setDailyGoal: (goal) => set({ dailyGoal: goal }),
       getDailyProgress: () => {
         return get().memorizedAyat.reduce((sum, a) => sum + a.dailyRepeatCount, 0);
       },
       resetDailyCounts: () =>
         set((state) => ({
-          memorizedAyat: state.memorizedAyat.map((a) => ({ ...a, dailyRepeatCount: 0, lastRepeat: new Date(0) })),
+          memorizedAyat: state.memorizedAyat.map((a) => ({ ...a, dailyRepeatCount: 0, lastRepeat: new Date(0).toISOString() })),
         })),
     }),
     {

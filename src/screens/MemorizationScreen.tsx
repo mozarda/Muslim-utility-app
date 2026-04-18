@@ -1,9 +1,19 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert, TextInput } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert, TextInput, ActivityIndicator } from 'react-native';
 import { useAppStore } from '../store/useAppStore';
+import { checkRecitation, TajweedCheckResult } from '../services/recitationCheck';
+import { startRecording, stopRecording, isRecording as isCurrentlyRecording } from '../utils/audioRecorder';
+
+type RecordingState = 'idle' | 'recording' | 'checking';
+
+interface ActiveRecording {
+  ayatId: string;
+  state: RecordingState;
+  result: TajweedCheckResult | null;
+}
 
 export default function MemorizationScreen() {
-  const { memorizedAyat, dailyGoal, defaultTargetRepetitions, addMemorizedAyat, incrementRepetition, setDailyGoal, setDefaultTargetRepetitions, getDailyProgress, resetDailyCounts } = useAppStore();
+  const { memorizedAyat, dailyGoal, defaultTargetRepetitions, addMemorizedAyat, incrementRepetition, setDailyGoal, setDefaultTargetRepetitions, getDailyProgress, resetDailyCounts, recordTajweedCheck } = useAppStore();
   const [surahInput, setSurahInput] = useState('');
   const [verseInput, setVerseInput] = useState('');
   const [textInput, setTextInput] = useState('');
@@ -11,49 +21,84 @@ export default function MemorizationScreen() {
   const [showForm, setShowForm] = useState(false);
   const [goalInput, setGoalInput] = useState(dailyGoal.toString());
   const [defaultTargetInput, setDefaultTargetInput] = useState(defaultTargetRepetitions.toString());
+  const [activeRecording, setActiveRecording] = useState<ActiveRecording | null>(null);
   const dailyProgress = getDailyProgress();
 
-  // Sync goal input with store when default changes
-  useEffect(() => {
-    setGoalInput(dailyGoal.toString());
-  }, [dailyGoal]);
+  const handleRecordPress = async (id: string, ayatText: string) => {
+    // If already recording this ayat, stop and check
+    if (activeRecording?.ayatId === id && activeRecording.state === 'recording') {
+      try {
+        setActiveRecording({ ayatId: id, state: 'checking', result: null });
+        const { base64 } = await stopRecording();
+        const result = await checkRecitation(base64, ayatText);
+        
+        // Save the check result to store
+        recordTajweedCheck(id, result);
+        
+        // If correct, auto-count the repetition
+        if (result.isCorrect) {
+          incrementRepetition(id);
+        }
 
-  // Sync default target input with store when it changes
-  useEffect(() => {
-    setDefaultTargetInput(defaultTargetRepetitions.toString());
-  }, [defaultTargetRepetitions]);
+        setActiveRecording({ ayatId: id, state: 'idle', result });
+      } catch (err: any) {
+        Alert.alert('Error', err.message || 'Recording failed');
+        setActiveRecording(null);
+      }
+      return;
+    }
 
-  const validateInputs = useCallback(() => {
-    const surah = parseInt(surahInput, 10);
-    const verse = parseInt(verseInput, 10);
-    const target = parseInt(targetInput, 10);
+    // If showing result for this ayat, dismiss
+    if (activeRecording?.ayatId === id && activeRecording.state === 'idle' && activeRecording.result) {
+      setActiveRecording(null);
+      return;
+    }
 
-    if (isNaN(surah) || surah < 1 || surah > 114) {
-      Alert.alert('Invalid Input', 'Surah number must be between 1 and 114');
-      return false;
+    // If recording a different ayat, cancel that first
+    if (activeRecording && isCurrentlyRecording()) {
+      // Can't record two at once
+      Alert.alert('Busy', 'Finish the current recording first');
+      return;
     }
-    if (isNaN(verse) || verse < 1) {
-      Alert.alert('Invalid Input', 'Verse number must be a positive integer');
-      return false;
+
+    // Start new recording
+    try {
+      await startRecording();
+      setActiveRecording({ ayatId: id, state: 'recording', result: null });
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Could not start recording');
     }
-    if (isNaN(target) || target < 1 || target > 1000) {
-      Alert.alert('Invalid Input', 'Target repetitions must be between 1 and 1000');
-      return false;
-    }
-    return true;
-  }, [surahInput, verseInput, targetInput]);
+  };
+
+  const handleRepeat = (id: string) => {
+    incrementRepetition(id);
+  };
 
   const handleAdd = () => {
     if (!surahInput || !verseInput || !textInput) {
       Alert.alert('Missing info', 'Please fill all fields');
       return;
     }
-    if (!validateInputs()) return;
-
+    const surah = parseInt(surahInput, 10);
+    const verse = parseInt(verseInput, 10);
     const target = parseInt(targetInput, 10);
+
+    if (isNaN(surah) || surah < 1 || surah > 114) {
+      Alert.alert('Invalid Input', 'Surah number must be between 1 and 114');
+      return;
+    }
+    if (isNaN(verse) || verse < 1) {
+      Alert.alert('Invalid Input', 'Verse number must be a positive integer');
+      return;
+    }
+    if (isNaN(target) || target < 1 || target > 1000) {
+      Alert.alert('Invalid Input', 'Target repetitions must be between 1 and 1000');
+      return;
+    }
+
     const success = addMemorizedAyat({
-      surahNumber: parseInt(surahInput, 10),
-      verseNumber: parseInt(verseInput, 10),
+      surahNumber: surah,
+      verseNumber: verse,
       text: textInput,
     }, target);
 
@@ -68,10 +113,6 @@ export default function MemorizationScreen() {
     setTargetInput(defaultTargetRepetitions.toString());
     setShowForm(false);
     Alert.alert('Success', 'Ayat added. Start repeating!');
-  };
-
-  const handleRepeat = (id: string) => {
-    incrementRepetition(id);
   };
 
   const handleDailyGoalBlur = () => {
@@ -105,12 +146,17 @@ export default function MemorizationScreen() {
     resetDayButton: { marginLeft: 10, padding: 5, backgroundColor: '#ff9800', borderRadius: 4 },
     resetDayText: { color: 'white', fontSize: 12 },
     listItem: { padding: 15, marginBottom: 10, backgroundColor: '#f9f9f9', borderRadius: 8, elevation: 2 },
-    ayatText: { fontSize: 16, marginBottom: 8, lineHeight: 24 },
+    ayatText: { fontSize: 18, marginBottom: 8, lineHeight: 28 },
     metaRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
     meta: { color: '#666', fontSize: 12 },
-    progressInfo: { fontSize: 12, color: '#2e7d32', marginBottom: 8 },
-    repeatButton: { backgroundColor: '#2e7d32', padding: 12, borderRadius: 6, alignItems: 'center' },
-    repeatText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
+    progressInfo: { fontSize: 12, color: '#2e7d32', marginBottom: 4 },
+    buttonRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
+    repeatButton: { flex: 1, backgroundColor: '#2e7d32', padding: 12, borderRadius: 6, alignItems: 'center' },
+    repeatText: { color: 'white', fontWeight: 'bold', fontSize: 14 },
+    recordButton: { flex: 1, backgroundColor: '#1565c0', padding: 12, borderRadius: 6, alignItems: 'center' },
+    recordButtonText: { color: 'white', fontWeight: 'bold', fontSize: 14 },
+    recordButtonRecording: { backgroundColor: '#c62828' },
+    recordButtonChecking: { backgroundColor: '#6a1b9a' },
     formContainer: { marginTop: 20, padding: 15, backgroundColor: '#f0f0f0', borderRadius: 8 },
     input: { borderWidth: 1, borderColor: '#ccc', padding: 10, marginBottom: 12, borderRadius: 6, backgroundColor: '#fff' },
     formButtons: { flexDirection: 'row', justifyContent: 'space-between' },
@@ -119,6 +165,13 @@ export default function MemorizationScreen() {
     cancelButton: { backgroundColor: '#c62828' },
     formButtonText: { color: 'white', fontWeight: 'bold' },
     emptyText: { textAlign: 'center', marginTop: 40, color: '#999', fontSize: 16 },
+    resultContainer: { marginTop: 8, padding: 10, borderRadius: 6, backgroundColor: '#f5f5f5' },
+    resultCorrect: { backgroundColor: '#e8f5e9' },
+    resultIncorrect: { backgroundColor: '#ffebee' },
+    resultError: { backgroundColor: '#fff3e0' },
+    resultText: { fontSize: 14, color: '#333' },
+    transcriptionText: { fontSize: 16, color: '#1565c0', marginTop: 4, lineHeight: 24 },
+    mistakeText: { fontSize: 14, color: '#c62828', marginTop: 4 },
   });
 
   const totalTarget = memorizedAyat.reduce((sum, a) => sum + a.targetRepetitions, 0);
@@ -219,6 +272,9 @@ export default function MemorizationScreen() {
         renderItem={({ item }) => {
           const progress = item.repetitionCount / item.targetRepetitions;
           const isComplete = item.repetitionCount >= item.targetRepetitions;
+          const isActive = activeRecording?.ayatId === item.id;
+          const lastCheck = item.lastTajweedCheck;
+
           return (
             <View style={styles.listItem}>
               <Text style={styles.ayatText}>{item.text}</Text>
@@ -231,12 +287,78 @@ export default function MemorizationScreen() {
               <Text style={styles.progressInfo}>Proficiency: {item.proficiency}/5</Text>
               <Text style={styles.meta}>Today: {item.dailyRepeatCount} reps</Text>
               
-              <TouchableOpacity 
-                style={[styles.repeatButton, isComplete && { backgroundColor: '#4caf50' }]} 
-                onPress={() => handleRepeat(item.id)}
-              >
-                <Text style={styles.repeatText}>{isComplete ? 'Completed ✓' : `Repeat (${item.repetitionCount})`}</Text>
-              </TouchableOpacity>
+              {/* Tajweed check result */}
+              {isActive && activeRecording?.result && (
+                <View style={[
+                  styles.resultContainer,
+                  activeRecording.result.isCorrect ? styles.resultCorrect : activeRecording.result.error ? styles.resultError : styles.resultIncorrect,
+                ]}>
+                  {activeRecording.result.isCorrect && (
+                    <Text style={[styles.resultText, { color: '#2e7d32', fontWeight: 'bold' }]}>
+                      ✅ Correct recitation! (Repetition counted)
+                    </Text>
+                  )}
+                  {!activeRecording.result.isCorrect && !activeRecording.result.error && (
+                    <>
+                      <Text style={[styles.resultText, { color: '#c62828', fontWeight: 'bold' }]}>
+                        ❌ Needs correction
+                      </Text>
+                      {activeRecording.result.transcription && (
+                        <Text style={styles.transcriptionText}>You said: {activeRecording.result.transcription}</Text>
+                      )}
+                      {activeRecording.result.mistakes.length > 0 && (
+                        <Text style={styles.mistakeText}>
+                          {activeRecording.result.mistakes.length} mistake(s) found
+                        </Text>
+                      )}
+                    </>
+                  )}
+                  {activeRecording.result.error && (
+                    <Text style={[styles.resultText, { color: '#e65100' }]}>
+                      ⚠️ {activeRecording.result.error}
+                    </Text>
+                  )}
+                </View>
+              )}
+
+              {/* Previous check result (when not actively recording) */}
+              {!isActive && lastCheck && (
+                <View style={[
+                  styles.resultContainer,
+                  lastCheck.isCorrect ? styles.resultCorrect : styles.resultIncorrect,
+                ]}>
+                  <Text style={[styles.resultText, { fontSize: 12 }]}>
+                    {lastCheck.isCorrect ? '✅ Last check: Correct' : '❌ Last check: Needs work'}
+                    {lastCheck.transcription ? ` — "${lastCheck.transcription}"` : ''}
+                  </Text>
+                </View>
+              )}
+              
+              <View style={styles.buttonRow}>
+                <TouchableOpacity 
+                  style={[styles.repeatButton, isComplete && { backgroundColor: '#4caf50' }]} 
+                  onPress={() => handleRepeat(item.id)}
+                >
+                  <Text style={styles.repeatText}>{isComplete ? 'Completed ✓' : `Tap Repeat (${item.repetitionCount})`}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[
+                    styles.recordButton,
+                    isActive && activeRecording?.state === 'recording' && styles.recordButtonRecording,
+                    isActive && activeRecording?.state === 'checking' && styles.recordButtonChecking,
+                  ]}
+                  onPress={() => handleRecordPress(item.id, item.text)}
+                  disabled={isActive && activeRecording?.state === 'checking'}
+                >
+                  {isActive && activeRecording?.state === 'recording' ? (
+                    <Text style={styles.recordButtonText}>🔴 Tap to Stop</Text>
+                  ) : isActive && activeRecording?.state === 'checking' ? (
+                    <ActivityIndicator color="white" />
+                  ) : (
+                    <Text style={styles.recordButtonText}>🎤 Check Recitation</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
           );
         }}
